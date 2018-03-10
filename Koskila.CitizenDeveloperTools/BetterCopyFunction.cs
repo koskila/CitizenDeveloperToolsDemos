@@ -47,7 +47,9 @@ using Microsoft.SharePoint.Client.Search.Query;
 
 namespace Koskila.CitizenDeveloperTools
 {
-
+    /// <summary>
+    /// Currently, does not work with lists with minor versions.
+    /// </summary>
     public static class BetterCopyFunction
     {
         public static readonly string clientId = System.Configuration.ConfigurationManager.AppSettings["clientId"];
@@ -75,83 +77,136 @@ namespace Koskila.CitizenDeveloperTools
             // Set name to query string or body data
             name = name ?? data?.name.Email;
 
-            string siteUrl = data?.targetUrl;
-            Uri siteUri = new Uri(siteUrl);
+            string targetUrl = data?.targetUrl;
+            string sourceUrl = data?.sourceUrl;
+            Uri targetSiteUri = new Uri(targetUrl);
+            Uri sourceSiteUri = new Uri(sourceUrl);
             string pageLayout = data?.pageLayout;
+
 
             int id = int.Parse((string) data?.targetId);
 
             // Get the realm for the URL
-            var realm = TokenHelper.GetRealmFromTargetUrl(siteUri);
+            var realm = TokenHelper.GetRealmFromTargetUrl(targetSiteUri);
             var tenantAdminUrl = ConfigurationManager.AppSettings["SiteCollectionRequests_TenantAdminSite"].TrimEnd(new[] { '/' });
             var tenantUrl = tenantAdminUrl.Substring(0, tenantAdminUrl.IndexOf(".com") + 4).Replace("-admin", "");
             AzureEnvironment env = TokenHelper.getAzureEnvironment(tenantAdminUrl);
-            using (var ctx = new OfficeDevPnP.Core.AuthenticationManager().GetAppOnlyAuthenticatedContext(siteUri.ToString(), clientId, clientSecret, env))
+            using (var ctx_target = new OfficeDevPnP.Core.AuthenticationManager().GetAppOnlyAuthenticatedContext(targetSiteUri.ToString(), clientId, clientSecret, env))
             {
-                var exists = ctx.WebExistsFullUrl(siteUrl);
-                
-
-                string weburl = siteUrl.Replace(tenantUrl, "");
-                var web = ctx.Site.OpenWeb(weburl);
-
-                ctx.Load(web);
-                ctx.ExecuteQuery();
-
-                log.Info(web.Title);
-
-                var list = web.Lists.GetByTitle("Pages");
-
-                ctx.Load(list);
-                ctx.ExecuteQuery();
-
-                log.Info(list.Title + " " + list.ItemCount);
-
-                ctx.Load(ctx.Site);
-                ctx.ExecuteQueryRetry();
-                pageLayout = ctx.Site.Url + pageLayout.Substring(pageLayout.IndexOf("/_catalogs"));
-
-                ListItem item = null;
-                try
+                using (var ctx_source = new OfficeDevPnP.Core.AuthenticationManager().GetAppOnlyAuthenticatedContext(sourceSiteUri.ToString(), clientId, clientSecret, env))
                 {
-                    string qs = String.Format("<View><Query><Where><Eq><FieldRef Name=\"ID\"></FieldRef><Value Type=\"Number\">{0}</Value></Eq></Where></Query></View>", id);
-                    CamlQuery query = new CamlQuery();
-                    query.ViewXml = qs;
-                    var items = list.GetItems(query);
+                    var exists = ctx_target.WebExistsFullUrl(targetUrl);
 
-                    ctx.Load(items);
-                    ctx.ExecuteQuery();
+                    string targetWebUrl = targetUrl.Replace(tenantUrl, "");
+                    var targetWeb = ctx_target.Site.OpenWeb(targetWebUrl);
 
-                    item = items.First();
-                }
-                catch (Exception ex)
-                {
-                    //Thread.Sleep(1000 * 60);
+                    ctx_target.Load(ctx_target.Site);
+                    ctx_target.Load(targetWeb);
+                    ctx_target.ExecuteQuery();
 
-                    item = web.GetListItem("/Pages/Forms/DispForm.aspx?ID=" + id);
+                    var sourceWeb = ctx_source.Site.OpenWeb(sourceUrl.Replace(tenantUrl, ""));
+                    ctx_source.Load(sourceWeb);
+                    ctx_source.ExecuteQuery();
 
-                    var items = list.GetItems(CamlQuery.CreateAllItemsQuery());
-                    //var items = list.GetItems()
-                    ctx.Load(items);
-                    ctx.ExecuteQueryRetry();
+                    log.Info(targetWeb.Title);
 
-                    for (int i = 0; i < items.Count; i++)
+                    pageLayout = ctx_target.Site.Url + pageLayout.Substring(pageLayout.IndexOf("/_catalogs"));
+
+
+                    var targetList = targetWeb.Lists.GetByTitle("Pages");
+                    ctx_target.Load(targetList);
+                    ctx_target.ExecuteQuery();
+
+                    var sourceList = sourceWeb.Lists.GetByTitle("Pages");
+                    ctx_source.Load(sourceList);
+                    ctx_source.ExecuteQuery();
+
+                    log.Info(targetList.Title + " " + targetList.ItemCount);
+
+                    string publishingPageContent = "";
+
+                    ListItem sourceItem = null;
+                    try
                     {
-                        if (items[i].Id == id) item = items[i];
+                        string qs = String.Format("<View><Query><Where><Eq><FieldRef Name=\"ID\"></FieldRef><Value Type=\"Number\">{0}</Value></Eq></Where></Query></View>", id);
+                        CamlQuery query = new CamlQuery();
+                        query.ViewXml = qs;
+                        var items = sourceList.GetItems(query);
+
+                        ctx_source.Load(items);
+                        ctx_source.ExecuteQuery();
+
+                        sourceItem = items.First();
                     }
+                    catch (Exception ex)
+                    {
+                        sourceItem = sourceWeb.GetListItem("/Pages/Forms/DispForm.aspx?ID=" + id);
+
+                        //var items = sourceList.GetItems(CamlQuery.CreateAllItemsQuery());
+                        ////var items = list.GetItems()
+                        //ctx_source.Load(items);
+                        //ctx_source.ExecuteQueryRetry();
+
+                        //for (int i = 0; i < items.Count; i++)
+                        //{
+                        //    if (items[i].Id == id) sourceItem = items[i];
+                        //}
+                    }
+                    finally
+                    {
+                        ctx_source.Load(sourceItem);
+                        ctx_source.Load(sourceItem, r => r.Client_Title, r => r.Properties);
+                        ctx_source.ExecuteQueryRetry();
+
+                        log.Info(sourceItem.Client_Title);
+
+                        publishingPageContent = sourceItem["PublishingPageContent"].ToString();
+                    }
+
+                    ListItem targetItem = null;
+                    try
+                    {
+                        string qs = String.Format("<View><Query><Where><Eq><FieldRef Name=\"ID\"></FieldRef><Value Type=\"Number\">{0}</Value></Eq></Where></Query></View>", id);
+                        CamlQuery query = new CamlQuery();
+                        query.ViewXml = qs;
+                        var items = targetList.GetItems(query);
+
+                        ctx_target.Load(items);
+                        ctx_target.ExecuteQuery();
+
+                        targetItem = items.First();
+                    }
+                    catch (Exception ex)
+                    {
+                        //Thread.Sleep(1000 * 60);
+
+                        targetItem = targetWeb.GetListItem("/Pages/Forms/DispForm.aspx?ID=" + id);
+
+                        var items = targetList.GetItems(CamlQuery.CreateAllItemsQuery());
+                        //var items = list.GetItems()
+                        ctx_target.Load(items);
+                        ctx_target.ExecuteQueryRetry();
+
+                        for (int i = 0; i < items.Count; i++)
+                        {
+                            if (items[i].Id == id) targetItem = items[i];
+                        }
+                    }
+                    finally
+                    {
+                        ctx_target.Load(targetItem);
+                        ctx_target.Load(targetItem, r => r.Client_Title, r => r.Properties);
+                        ctx_target.ExecuteQueryRetry();
+                    }
+
+                    log.Info(targetItem.Client_Title);
+
+                    targetItem["PublishingPageLayout"] = pageLayout;
+                    targetItem["PublishingPageContent"] = publishingPageContent;
+                    targetItem.SystemUpdate();
+
+                    ctx_target.ExecuteQuery();
                 }
-                finally
-                {
-                    ctx.Load(item);
-                    ctx.Load(item, r => r.Client_Title, r => r.Properties);
-                    ctx.ExecuteQueryRetry();
-                }
-
-                log.Info(item.Client_Title);
-
-                item["PublishingPageLayout"] = pageLayout;
-                item.SystemUpdate();
-
-                ctx.ExecuteQuery();
             }
 
             return name == null
