@@ -16,6 +16,10 @@ namespace Koskila.CitizenDeveloperTools
 {
     public static class SharePointWebhook
     {
+        private static readonly HttpClient _client = new HttpClient();
+        private static readonly string _apiAddress = System.Configuration.ConfigurationManager.AppSettings["ApiAddress"];
+        private static readonly string _notificationFlowAddress = System.Configuration.ConfigurationManager.AppSettings["NotificationFlowAddress"];
+
         /// <summary>
         /// https://docs.microsoft.com/en-us/sharepoint/dev/apis/webhooks/sharepoint-webhooks-using-azure-functions
         /// </summary>
@@ -50,29 +54,59 @@ namespace Koskila.CitizenDeveloperTools
             var notifications = JsonConvert.DeserializeObject<ResponseModel<NotificationModel>>(content).Value;
             log.Info($"Found {notifications.Count} notifications");
 
+            // now send the query to a custom API as a POST
+            var values = new Dictionary<string, string>();
+
             if (notifications.Count > 0)
             {
                 log.Info($"Processing notifications...");
-                foreach (var notification in notifications)
+                for (int i = 0; i < notifications.Count; i++)
                 {
-                    CloudStorageAccount storageAccount = CloudStorageAccount.Parse("<YOUR STORAGE ACCOUNT>");
-                    // Get queue... create if does not exist.
-                    CloudQueueClient queueClient = storageAccount.CreateCloudQueueClient();
-                    CloudQueue queue = queueClient.GetQueueReference("sharepointlistwebhookeventazuread");
-                    queue.CreateIfNotExists();
+                    var n = notifications[i];
+                    //        CloudStorageAccount storageAccount = CloudStorageAccount.Parse("<YOUR STORAGE ACCOUNT>");
+                    //        // Get queue... create if does not exist.
+                    //        CloudQueueClient queueClient = storageAccount.CreateCloudQueueClient();
+                    //        CloudQueue queue = queueClient.GetQueueReference("sharepointlistwebhookeventazuread");
+                    //        queue.CreateIfNotExists();
 
-                    // add message to the queue
-                    string message = JsonConvert.SerializeObject(notification);
-                    log.Info($"Before adding a message to the queue. Message content: {message}");
-                    queue.AddMessage(new CloudQueueMessage(message));
-                    log.Info($"Message added :-)");
+                    //        // add message to the queue
+                    string m = JsonConvert.SerializeObject(n);
+                    //        log.Info($"Before adding a message to the queue. Message content: {message}");
+                    //        queue.AddMessage(new CloudQueueMessage(message));
+                    //        log.Info($"Message added :-)");
+
+                    values.Add("message"+i, m);
                 }
+
+                var stringcontent = new FormUrlEncodedContent(values);
+
+                var apiresponse = await _client.PostAsync(_apiAddress, stringcontent);
+
+                var responseString = await apiresponse.Content.ReadAsStringAsync();
+
+                log.Info($"Got this: " + responseString);
+
+                // we have the response, now we let another flow know about it - through a call to the API!
+                var notification = notifications.First();
+                var message = JsonConvert.SerializeObject(notification);
+                string link = notification.SiteUrl;
+                var obj = new Dictionary<string, string>();
+                obj.Add("message", "Webhook triggered! Message: " + message);
+                obj.Add("link", link);
+                stringcontent = new FormUrlEncodedContent(obj);
+
+                log.Info($"Now pushing this: " + message);
+                apiresponse = await _client.PostAsync(_notificationFlowAddress, stringcontent);
+
+                log.Info($"Pushed to Flow! Got this back: " + apiresponse);
+
+                // if we get here we assume the request was well received
+                return new HttpResponseMessage(HttpStatusCode.OK);
             }
 
-            // if we get here we assume the request was well received
-            return new HttpResponseMessage(HttpStatusCode.OK);
+            log.Info($"Got nothing! Logging bad request.");
+            return new HttpResponseMessage(HttpStatusCode.BadRequest);
         }
-
 
         // supporting classes
         public class ResponseModel<T>
