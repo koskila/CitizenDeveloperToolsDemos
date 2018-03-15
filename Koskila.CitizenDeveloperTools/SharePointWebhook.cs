@@ -12,6 +12,18 @@ using Microsoft.WindowsAzure.Storage;
 using Microsoft.WindowsAzure.Storage.Queue;
 using System.Collections.Generic;
 
+using OfficeDevPnP.Core;
+using Microsoft.SharePoint.Client;
+using System;
+using System.IO;
+using System.Text.RegularExpressions;
+using System.Collections.Generic;
+//using Microsoft.Azure.CognitiveServices.Language.TextAnalytics.Models;
+//using Microsoft.Azure.CognitiveServices.Language.TextAnalytics;
+using System.Globalization;
+using Microsoft.SharePoint.Client.Taxonomy;
+using System.Configuration;
+
 namespace Koskila.CitizenDeveloperTools
 {
     public static class SharePointWebhook
@@ -19,6 +31,9 @@ namespace Koskila.CitizenDeveloperTools
         private static readonly HttpClient _client = new HttpClient();
         private static readonly string _apiAddress = System.Configuration.ConfigurationManager.AppSettings["ApiAddress"];
         private static readonly string _notificationFlowAddress = System.Configuration.ConfigurationManager.AppSettings["NotificationFlowAddress"];
+
+        public static readonly string clientId = System.Configuration.ConfigurationManager.AppSettings["clientId"];
+        public static readonly string clientSecret = System.Configuration.ConfigurationManager.AppSettings["clientSecret"];
 
         /// <summary>
         /// https://docs.microsoft.com/en-us/sharepoint/dev/apis/webhooks/sharepoint-webhooks-using-azure-functions
@@ -54,55 +69,87 @@ namespace Koskila.CitizenDeveloperTools
             var notifications = JsonConvert.DeserializeObject<ResponseModel<NotificationModel>>(content).Value;
             log.Info($"Found {notifications.Count} notifications");
 
-            // now send the query to a custom API as a POST
-            var values = new Dictionary<string, string>();
+            // there should always be just one so let's get the first item
+            var notification = notifications.First();
 
-            if (notifications.Count > 0)
+            // Get the realm for the URL
+            var tenantAdminUrl = ConfigurationManager.AppSettings["SiteCollectionRequests_TenantAdminSite"].TrimEnd(new[] { '/' });
+            var tenantUrl = tenantAdminUrl.Substring(0, tenantAdminUrl.IndexOf(".com") + 4).Replace("-admin", "");
+            AzureEnvironment env = TokenHelper.getAzureEnvironment(tenantAdminUrl);
+            Uri targetSiteUri = new Uri(string.Format("https://{0}{1}", tenantUrl, notification.SiteUrl));
+            var realm = TokenHelper.GetRealmFromTargetUrl(targetSiteUri);
+            using (var ctx = new OfficeDevPnP.Core.AuthenticationManager().GetAppOnlyAuthenticatedContext(targetSiteUri.ToString(), clientId, clientSecret, env))
             {
-                log.Info($"Processing notifications...");
-                for (int i = 0; i < notifications.Count; i++)
+                var ctxWeb = ctx.Site.OpenWebById(new Guid(notification.WebId));
+                try
                 {
-                    var n = notifications[i];
-                    //        CloudStorageAccount storageAccount = CloudStorageAccount.Parse("<YOUR STORAGE ACCOUNT>");
-                    //        // Get queue... create if does not exist.
-                    //        CloudQueueClient queueClient = storageAccount.CreateCloudQueueClient();
-                    //        CloudQueue queue = queueClient.GetQueueReference("sharepointlistwebhookeventazuread");
-                    //        queue.CreateIfNotExists();
-
-                    //        // add message to the queue
-                    string m = JsonConvert.SerializeObject(n);
-                    //        log.Info($"Before adding a message to the queue. Message content: {message}");
-                    //        queue.AddMessage(new CloudQueueMessage(message));
-                    //        log.Info($"Message added :-)");
-
-                    values.Add("message"+i, m);
+                    ctx.ExecuteQueryRetry();
+                }
+                catch (Exception ex)
+                {
+                    log.Info("Error in ctx ExecuteQueryRetry, stage 1: " + ex.Message);
+                    throw;
                 }
 
-                var stringcontent = new FormUrlEncodedContent(values);
+                Guid listId = new Guid(notification.Resource);
 
-                var apiresponse = await _client.PostAsync(_apiAddress, stringcontent);
+                List targetList = ctxWeb.Lists.GetById(listId);
+                ctx.Load(targetList, List => List.ParentWebUrl);
+                ctx.ExecuteQueryRetry();
 
-                var responseString = await apiresponse.Content.ReadAsStringAsync();
 
-                log.Info($"Got this: " + responseString);
 
-                // we have the response, now we let another flow know about it - through a call to the API!
-                var notification = notifications.First();
-                var message = JsonConvert.SerializeObject(notification);
-                string link = notification.SiteUrl;
-                var obj = new Dictionary<string, string>();
-                obj.Add("message", "Webhook triggered! Message: " + message);
-                obj.Add("link", link);
-                stringcontent = new FormUrlEncodedContent(obj);
+                // now send the query to a custom API as a POST
+                var values = new Dictionary<string, string>();
 
-                log.Info($"Now pushing this: " + message);
-                apiresponse = await _client.PostAsync(_notificationFlowAddress, stringcontent);
+                if (notifications.Count > 0)
+                {
+                    log.Info($"Processing notifications...");
+                    for (int i = 0; i < notifications.Count; i++)
+                    {
+                        var n = notifications[i];
+                        //        CloudStorageAccount storageAccount = CloudStorageAccount.Parse("<YOUR STORAGE ACCOUNT>");
+                        //        // Get queue... create if does not exist.
+                        //        CloudQueueClient queueClient = storageAccount.CreateCloudQueueClient();
+                        //        CloudQueue queue = queueClient.GetQueueReference("sharepointlistwebhookeventazuread");
+                        //        queue.CreateIfNotExists();
 
-                log.Info($"Pushed to Flow! Got this back: " + apiresponse);
+                        //        // add message to the queue
+                        string m = JsonConvert.SerializeObject(n);
+                        //        log.Info($"Before adding a message to the queue. Message content: {message}");
+                        //        queue.AddMessage(new CloudQueueMessage(message));
+                        //        log.Info($"Message added :-)");
 
-                // if we get here we assume the request was well received
-                return new HttpResponseMessage(HttpStatusCode.OK);
+                        values.Add("message" + i, m);
+                    }
+
+                    var stringcontent = new FormUrlEncodedContent(values);
+
+                    var apiresponse = await _client.PostAsync(_apiAddress, stringcontent);
+
+                    var responseString = await apiresponse.Content.ReadAsStringAsync();
+
+                    log.Info($"Got this: " + responseString);
+
+                    // we have the response, now we let another flow know about it - through a call to the API!
+                    var message = JsonConvert.SerializeObject(notification);
+                    string link = notification.SiteUrl;
+                    var obj = new Dictionary<string, string>();
+                    obj.Add("message", "Webhook triggered! Message: " + message);
+                    obj.Add("link", link);
+                    stringcontent = new FormUrlEncodedContent(obj);
+
+                    log.Info($"Now pushing this: " + message);
+                    apiresponse = await _client.PostAsync(_notificationFlowAddress, stringcontent);
+
+                    log.Info($"Pushed to Flow! Got this back: " + apiresponse);
+
+                    // if we get here we assume the request was well received
+                    return new HttpResponseMessage(HttpStatusCode.OK);
+                }
             }
+
+                
 
             log.Info($"Got nothing! Logging bad request.");
             return new HttpResponseMessage(HttpStatusCode.BadRequest);
