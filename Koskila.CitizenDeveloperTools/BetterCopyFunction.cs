@@ -68,14 +68,12 @@ namespace Koskila.CitizenDeveloperTools
                 .FirstOrDefault(q => string.Compare(q.Key, "pagelayout", true) == 0)
                 .Value;
 
+            string errorMsg = "";
 
             // Get request body
             //string results = req.Content.ReadAsStringAsync().Result;
 
             dynamic data = await req.Content.ReadAsAsync<object>();
-
-            // Set name to query string or body data
-            name = name ?? data?.name.Email;
 
             string targetUrl = data?.targetUrl;
             string sourceUrl = data?.sourceUrl;
@@ -83,8 +81,9 @@ namespace Koskila.CitizenDeveloperTools
             Uri sourceSiteUri = new Uri(sourceUrl);
             string pageLayout = data?.pageLayout;
 
+            string fileName = ""; // we get this from the source item
 
-            int id = int.Parse((string) data?.targetId);
+            int id = int.Parse((string) data?.sourceId);
 
             // Get the realm for the URL
             var realm = TokenHelper.GetRealmFromTargetUrl(targetSiteUri);
@@ -112,14 +111,13 @@ namespace Koskila.CitizenDeveloperTools
 
                     pageLayout = ctx_target.Site.Url + pageLayout.Substring(pageLayout.IndexOf("/_catalogs"));
 
+                    var sourceList = sourceWeb.Lists.GetByTitle("Pages");
+                    ctx_source.Load(sourceList);
+                    ctx_source.ExecuteQuery();
 
                     var targetList = targetWeb.Lists.GetByTitle("Pages");
                     ctx_target.Load(targetList);
                     ctx_target.ExecuteQuery();
-
-                    var sourceList = sourceWeb.Lists.GetByTitle("Pages");
-                    ctx_source.Load(sourceList);
-                    ctx_source.ExecuteQuery();
 
                     log.Info(targetList.Title + " " + targetList.ItemCount);
 
@@ -128,58 +126,60 @@ namespace Koskila.CitizenDeveloperTools
                     ListItem sourceItem = null;
                     try
                     {
-                        string qs = String.Format("<View><Query><Where><Eq><FieldRef Name=\"ID\"></FieldRef><Value Type=\"Number\">{0}</Value></Eq></Where></Query></View>", id);
-                        CamlQuery query = new CamlQuery();
-                        query.ViewXml = qs;
-                        var items = sourceList.GetItems(query);
+                        sourceItem = sourceList.GetItemById(id);
 
-                        ctx_source.Load(items);
-                        ctx_source.ExecuteQuery();
+                        if (sourceItem == null)
+                        {
+                            string qs = String.Format("<View><Query><Where><Eq><FieldRef Name=\"ID\"></FieldRef><Value Type=\"Number\">{0}</Value></Eq></Where></Query></View>", id);
+                            CamlQuery query = new CamlQuery();
+                            query.ViewXml = qs;
+                            var items = sourceList.GetItems(query);
 
-                        sourceItem = items.First();
+                            ctx_source.Load(items);
+                            ctx_source.ExecuteQuery();
+
+                            sourceItem = items.First();
+                        }
                     }
                     catch (Exception ex)
                     {
                         sourceItem = sourceWeb.GetListItem("/Pages/Forms/DispForm.aspx?ID=" + id);
-
-                        //var items = sourceList.GetItems(CamlQuery.CreateAllItemsQuery());
-                        ////var items = list.GetItems()
-                        //ctx_source.Load(items);
-                        //ctx_source.ExecuteQueryRetry();
-
-                        //for (int i = 0; i < items.Count; i++)
-                        //{
-                        //    if (items[i].Id == id) sourceItem = items[i];
-                        //}
+                        errorMsg += ex.Message + " ";
                     }
                     finally
                     {
                         ctx_source.Load(sourceItem);
+                        ctx_source.Load(sourceItem.File);
                         ctx_source.Load(sourceItem, r => r.Client_Title, r => r.Properties);
                         ctx_source.ExecuteQueryRetry();
 
                         log.Info(sourceItem.Client_Title);
 
-                        publishingPageContent = sourceItem["PublishingPageContent"].ToString();
+                        if (sourceItem["PublishingPageContent"] != null) publishingPageContent = sourceItem["PublishingPageContent"].ToString();
                     }
+
+                    fileName = sourceItem.File.Name;
 
                     ListItem targetItem = null;
                     try
                     {
-                        string qs = String.Format("<View><Query><Where><Eq><FieldRef Name=\"ID\"></FieldRef><Value Type=\"Number\">{0}</Value></Eq></Where></Query></View>", id);
-                        CamlQuery query = new CamlQuery();
-                        query.ViewXml = qs;
-                        var items = targetList.GetItems(query);
+                        targetItem = targetList.GetItemById(id);
 
-                        ctx_target.Load(items);
-                        ctx_target.ExecuteQuery();
+                        if (targetItem == null)
+                        {
+                            string qs1 = String.Format("<View><Query><Where><Eq><FieldRef Name=\"ID\"></FieldRef><Value Type=\"Number\">{0}</Value></Eq></Where></Query></View>", id);
+                            CamlQuery query1 = new CamlQuery();
+                            query1.ViewXml = qs1;
+                            var items1 = targetList.GetItems(query1);
 
-                        targetItem = items.First();
+                            ctx_target.Load(items1);
+                            ctx_target.ExecuteQuery();
+
+                            targetItem = items1.First();
+                        }
                     }
                     catch (Exception ex)
                     {
-                        //Thread.Sleep(1000 * 60);
-
                         targetItem = targetWeb.GetListItem("/Pages/Forms/DispForm.aspx?ID=" + id);
 
                         var items = targetList.GetItems(CamlQuery.CreateAllItemsQuery());
@@ -194,6 +194,21 @@ namespace Koskila.CitizenDeveloperTools
                     }
                     finally
                     {
+                        try
+                        {
+                            string str = "Published";
+                            targetItem.File.CheckIn(str, CheckinType.MajorCheckIn);
+                            targetItem.File.Publish(str);
+
+                            ctx_target.Load(targetItem);
+
+                            ctx_target.ExecuteQueryRetry();
+                        }
+                        catch (Exception ex)
+                        {
+                            //throw;
+                        }
+
                         ctx_target.Load(targetItem);
                         ctx_target.Load(targetItem, r => r.Client_Title, r => r.Properties);
                         ctx_target.ExecuteQueryRetry();
@@ -209,9 +224,9 @@ namespace Koskila.CitizenDeveloperTools
                 }
             }
 
-            return name == null
-            ? req.CreateResponse(HttpStatusCode.BadRequest, "Please pass a name on the query string or in the request body")
-            : req.CreateResponse(HttpStatusCode.OK, "Hello " + name);
+            return String.IsNullOrEmpty(errorMsg)
+            ? req.CreateResponse(HttpStatusCode.InternalServerError, errorMsg)
+            : req.CreateResponse(HttpStatusCode.OK, "Function run was a success.");
         }
     }
 }
