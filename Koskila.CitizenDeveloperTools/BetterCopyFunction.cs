@@ -160,6 +160,7 @@ namespace Koskila.CitizenDeveloperTools
 
                     fileName = sourceItem.File.Name;
 
+                    // at this point, we've fetched all the info we needed. On to getting the target item, and then updating the fields there.
                     ListItem targetItem = null;
                     try
                     {
@@ -180,10 +181,11 @@ namespace Koskila.CitizenDeveloperTools
                     }
                     catch (Exception ex)
                     {
+                        log.Warning("Getting source item via conventional ways failed. Trying the unorthodox ones...");
+
                         targetItem = targetWeb.GetListItem("/Pages/Forms/DispForm.aspx?ID=" + id);
 
                         var items = targetList.GetItems(CamlQuery.CreateAllItemsQuery());
-                        //var items = list.GetItems()
                         ctx_target.Load(items);
                         ctx_target.ExecuteQueryRetry();
 
@@ -206,7 +208,7 @@ namespace Koskila.CitizenDeveloperTools
                         }
                         catch (Exception ex)
                         {
-                            //throw;
+                            log.Info("Error: " + ex.Message);
                         }
 
                         ctx_target.Load(targetItem);
@@ -214,19 +216,31 @@ namespace Koskila.CitizenDeveloperTools
                         ctx_target.ExecuteQueryRetry();
                     }
 
-                    log.Info(targetItem.Client_Title);
+                    log.Info("Target item title: " + targetItem.Client_Title);
 
-                    targetItem["PublishingPageLayout"] = pageLayout;
-                    targetItem["PublishingPageContent"] = publishingPageContent;
-                    targetItem.SystemUpdate();
+                    try
+                    {
+                        targetItem["PublishingPageLayout"] = pageLayout;
+                        targetItem["PublishingPageContent"] = publishingPageContent;
+                        targetItem.SystemUpdate();
 
-                    ctx_target.ExecuteQuery();
+                        ctx_target.ExecuteQuery();
+                    }
+                    catch (Exception ex)
+                    {
+                        log.Warning("There was an error in saving target item values. Values were: " + pageLayout + " " + publishingPageContent);
+                        log.Warning("Error was: " + ex.Message);
+                    }
+                    finally
+                    { 
+                        log.Info("Target item updated!");
+                    }
                 }
             }
 
             return String.IsNullOrEmpty(errorMsg)
-            ? req.CreateResponse(HttpStatusCode.InternalServerError, errorMsg)
-            : req.CreateResponse(HttpStatusCode.OK, "Function run was a success.");
+            ? req.CreateResponse(HttpStatusCode.OK, "Function run was a success.")
+            : req.CreateResponse(HttpStatusCode.InternalServerError, errorMsg);
         }
     }
 }
