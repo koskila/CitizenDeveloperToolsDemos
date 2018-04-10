@@ -8,42 +8,28 @@ using Microsoft.Azure.WebJobs.Host;
 using OfficeDevPnP.Core;
 using Microsoft.SharePoint.Client;
 using System;
-using System.IO;
 using System.Text.RegularExpressions;
 using System.Collections.Generic;
-//using Microsoft.Azure.CognitiveServices.Language.TextAnalytics.Models;
-//using Microsoft.Azure.CognitiveServices.Language.TextAnalytics;
 using System.Globalization;
 using Microsoft.SharePoint.Client.Taxonomy;
 
 using TaxonomyExtensions = Microsoft.SharePoint.Client.TaxonomyExtensions;
 
-using System;
-using System.Collections.Generic;
 using System.Configuration;
 using System.Diagnostics;
-using System.Globalization;
-using System.IO;
-using System.Linq;
-using System.Net;
 using System.Text;
 using System.Threading;
 using System.Web.UI.WebControls.WebParts;
 using System.Xml;
 using System.Xml.Serialization;
-
 using Microsoft.Online.SharePoint.TenantAdministration;
 using Microsoft.Online.SharePoint.TenantManagement;
-using Microsoft.SharePoint.Client;
 using Microsoft.SharePoint.Client.Utilities;
 using Newtonsoft.Json;
 using Newtonsoft.Json.Linq;
 using OfficeDevPnP.Core.Utilities;
 using Utility = Microsoft.SharePoint.Client.Utilities.Utility;
-using System.Text.RegularExpressions;
-using OfficeDevPnP.Core;
 using System.Security;
-using Microsoft.SharePoint.Client.Search.Query;
 
 namespace Koskila.CitizenDeveloperTools
 {
