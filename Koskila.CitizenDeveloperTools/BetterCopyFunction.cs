@@ -44,25 +44,12 @@ namespace Koskila.CitizenDeveloperTools
         [FunctionName("BetterCopy2")]
         public static async Task<HttpResponseMessage> Run([HttpTrigger(AuthorizationLevel.Function, "get", "post", Route = null)]HttpRequestMessage req, TraceWriter log)
         {
-            log.Info("C# HTTP trigger function processed a request.");
-
-            // parse query parameter
-            string name = req.GetQueryNameValuePairs()
-                .FirstOrDefault(q => string.Compare(q.Key, "user", true) == 0)
-                .Value;
-            string pagelayout = req.GetQueryNameValuePairs()
-                .FirstOrDefault(q => string.Compare(q.Key, "pagelayout", true) == 0)
-                .Value;
+            log.Info("C# HTTP trigger function BetterCopyFunction processed a request.");
 
             string errorMsg = "";
 
-            // Get request body
-            //string results = req.Content.ReadAsStringAsync().Result;
-
             try
             {
-
-
                 dynamic data = await req.Content.ReadAsAsync<object>();
 
                 string targetUrl = data?.targetUrl;
@@ -75,6 +62,7 @@ namespace Koskila.CitizenDeveloperTools
 
                 int sourceId;
 
+                
                 try
                 {
                     string strSourceId = data?.sourceId;
@@ -82,13 +70,19 @@ namespace Koskila.CitizenDeveloperTools
                 }
                 catch (Exception)
                 {
+                    log.Error("Setting up variables failed.");
                     errorMsg += "Setting up variables failed.";
                     throw;
                 }
 
+                log.Info("Got the variables! Now connecting to SharePoint...");
+
                 // Get the realm for the URL
                 var realm = TokenHelper.GetRealmFromTargetUrl(targetSiteUri);
-                var tenantAdminUrl = ConfigurationManager.AppSettings["SiteCollectionRequests_TenantAdminSite"].TrimEnd(new[] { '/' });
+                //var tenantAdminUrl = ConfigurationManager.AppSettings["SiteCollectionRequests_TenantAdminSite"].TrimEnd(new[] { '/' });
+                // parse tenant admin url from the sourceUrl (there's probably a cuter way to do this but this is simple :])
+                string tenantAdminUrl = sourceUrl.Substring(0, sourceUrl.IndexOf(".com") + 4).TrimEnd(new[] { '/' }).Replace(".sharepoint", "-admin.sharepoint");
+                // parse tenant admin url from the sourceUrl
                 var tenantUrl = tenantAdminUrl.Substring(0, tenantAdminUrl.IndexOf(".com") + 4).Replace("-admin", "");
                 AzureEnvironment env = TokenHelper.getAzureEnvironment(tenantAdminUrl);
                 using (var ctx_target = new OfficeDevPnP.Core.AuthenticationManager().GetAppOnlyAuthenticatedContext(targetSiteUri.ToString(), clientId, clientSecret, env))
@@ -108,7 +102,7 @@ namespace Koskila.CitizenDeveloperTools
                         ctx_source.Load(sourceWeb);
                         ctx_source.ExecuteQuery();
 
-                        log.Info(targetWeb.Title);
+                        log.Info("SharePoint connection fine! Connected to: " + targetWeb.Title);
 
                         pageLayout = ctx_target.Site.Url + pageLayout.Substring(pageLayout.IndexOf("/_catalogs"));
 
@@ -120,7 +114,7 @@ namespace Koskila.CitizenDeveloperTools
                         ctx_target.Load(targetList);
                         ctx_target.ExecuteQuery();
 
-                        log.Info(targetList.Title + " " + targetList.ItemCount);
+                        log.Info("... and: " + targetList.Title + " " + targetList.ItemCount);
 
                         string publishingPageContent = "";
 
@@ -154,7 +148,7 @@ namespace Koskila.CitizenDeveloperTools
                             ctx_source.Load(sourceItem, r => r.Client_Title, r => r.Properties);
                             ctx_source.ExecuteQueryRetry();
 
-                            log.Info(sourceItem.Client_Title);
+                            log.Info("Got source item! Title: " + sourceItem.Client_Title);
 
                             if (sourceItem["PublishingPageContent"] != null) publishingPageContent = sourceItem["PublishingPageContent"].ToString();
                         }
@@ -199,7 +193,7 @@ namespace Koskila.CitizenDeveloperTools
                         {
                             try
                             {
-                                string str = "Published";
+                                string str = "Published automatically by an Azure Function (BetterCopyFunction).";
                                 targetItem.File.CheckIn(str, CheckinType.MajorCheckIn);
                                 targetItem.File.Publish(str);
 
@@ -243,6 +237,8 @@ namespace Koskila.CitizenDeveloperTools
             {
                 errorMsg += ex.Message;
                 errorMsg += "\r\n " + ex.StackTrace;
+
+                throw;
             }
 
             return String.IsNullOrEmpty(errorMsg)
