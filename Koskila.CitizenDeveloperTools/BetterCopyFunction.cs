@@ -8,28 +8,6 @@ using Microsoft.Azure.WebJobs.Host;
 using OfficeDevPnP.Core;
 using Microsoft.SharePoint.Client;
 using System;
-using System.Text.RegularExpressions;
-using System.Collections.Generic;
-using System.Globalization;
-using Microsoft.SharePoint.Client.Taxonomy;
-
-using TaxonomyExtensions = Microsoft.SharePoint.Client.TaxonomyExtensions;
-
-using System.Configuration;
-using System.Diagnostics;
-using System.Text;
-using System.Threading;
-using System.Web.UI.WebControls.WebParts;
-using System.Xml;
-using System.Xml.Serialization;
-using Microsoft.Online.SharePoint.TenantAdministration;
-using Microsoft.Online.SharePoint.TenantManagement;
-using Microsoft.SharePoint.Client.Utilities;
-using Newtonsoft.Json;
-using Newtonsoft.Json.Linq;
-using OfficeDevPnP.Core.Utilities;
-using Utility = Microsoft.SharePoint.Client.Utilities.Utility;
-using System.Security;
 
 namespace Koskila.CitizenDeveloperTools
 {
@@ -61,8 +39,7 @@ namespace Koskila.CitizenDeveloperTools
                 string fileName = ""; // we get this from the source item
 
                 int sourceId;
-
-                
+  
                 try
                 {
                     string strSourceId = data?.sourceId;
@@ -79,7 +56,6 @@ namespace Koskila.CitizenDeveloperTools
 
                 // Get the realm for the URL
                 var realm = TokenHelper.GetRealmFromTargetUrl(targetSiteUri);
-                //var tenantAdminUrl = ConfigurationManager.AppSettings["SiteCollectionRequests_TenantAdminSite"].TrimEnd(new[] { '/' });
                 // parse tenant admin url from the sourceUrl (there's probably a cuter way to do this but this is simple :])
                 string tenantAdminUrl = sourceUrl.Substring(0, sourceUrl.IndexOf(".com") + 4).TrimEnd(new[] { '/' }).Replace(".sharepoint", "-admin.sharepoint");
                 // parse tenant admin url from the sourceUrl
