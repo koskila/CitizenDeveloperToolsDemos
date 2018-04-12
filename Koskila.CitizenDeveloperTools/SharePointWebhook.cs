@@ -35,6 +35,8 @@ namespace Koskila.CitizenDeveloperTools
         public static readonly string clientId = System.Configuration.ConfigurationManager.AppSettings["clientId"];
         public static readonly string clientSecret = System.Configuration.ConfigurationManager.AppSettings["clientSecret"];
 
+        private const bool enrichViaExternalAPI = false;
+
         /// <summary>
         /// https://docs.microsoft.com/en-us/sharepoint/dev/apis/webhooks/sharepoint-webhooks-using-azure-functions
         /// </summary>
@@ -76,7 +78,13 @@ namespace Koskila.CitizenDeveloperTools
             var tenantAdminUrl = ConfigurationManager.AppSettings["SiteCollectionRequests_TenantAdminSite"].TrimEnd(new[] { '/' });
             var tenantUrl = tenantAdminUrl.Substring(0, tenantAdminUrl.IndexOf(".com") + 4).Replace("-admin", "");
             AzureEnvironment env = TokenHelper.getAzureEnvironment(tenantAdminUrl);
-            Uri targetSiteUri = new Uri(string.Format("https://{0}{1}", tenantUrl, notification.SiteUrl));
+            log.Info($"Tenant url {tenantUrl} and notification from {notification.SiteUrl} ");
+
+            string fullUrl = string.Format("https://{0}{1}", tenantUrl, notification.SiteUrl);
+            log.Info($"{fullUrl}");
+            Uri targetSiteUri = new Uri(fullUrl);
+            log.Info($"Connecting to SharePoint at {targetSiteUri.AbsoluteUri}");
+
             var realm = TokenHelper.GetRealmFromTargetUrl(targetSiteUri);
             using (var ctx = new OfficeDevPnP.Core.AuthenticationManager().GetAppOnlyAuthenticatedContext(targetSiteUri.ToString(), clientId, clientSecret, env))
             {
@@ -87,7 +95,7 @@ namespace Koskila.CitizenDeveloperTools
                 }
                 catch (Exception ex)
                 {
-                    log.Info("Error in ctx ExecuteQueryRetry, stage 1: " + ex.Message);
+                    log.Error("Error in ctx ExecuteQueryRetry, stage 1: " + ex.Message);
                     throw;
                 }
 
@@ -97,7 +105,7 @@ namespace Koskila.CitizenDeveloperTools
                 ctx.Load(targetList, List => List.ParentWebUrl);
                 ctx.ExecuteQueryRetry();
 
-
+                log.Info($"Got list {targetList.Title} at {ctxWeb.Url} !");
 
                 // now send the query to a custom API as a POST
                 var values = new Dictionary<string, string>();
@@ -105,37 +113,46 @@ namespace Koskila.CitizenDeveloperTools
                 if (notifications.Count > 0)
                 {
                     log.Info($"Processing notifications...");
-                    for (int i = 0; i < notifications.Count; i++)
+
+                    FormUrlEncodedContent stringcontent;
+                    HttpResponseMessage apiresponse;
+
+                    if (enrichViaExternalAPI)
                     {
-                        var n = notifications[i];
-                        //        CloudStorageAccount storageAccount = CloudStorageAccount.Parse("<YOUR STORAGE ACCOUNT>");
-                        //        // Get queue... create if does not exist.
-                        //        CloudQueueClient queueClient = storageAccount.CreateCloudQueueClient();
-                        //        CloudQueue queue = queueClient.GetQueueReference("sharepointlistwebhookeventazuread");
-                        //        queue.CreateIfNotExists();
+                        for (int i = 0; i < notifications.Count; i++)
+                        {
+                            var n = notifications[i];
+                            //        CloudStorageAccount storageAccount = CloudStorageAccount.Parse("<YOUR STORAGE ACCOUNT>");
+                            //        // Get queue... create if does not exist.
+                            //        CloudQueueClient queueClient = storageAccount.CreateCloudQueueClient();
+                            //        CloudQueue queue = queueClient.GetQueueReference("sharepointlistwebhookeventazuread");
+                            //        queue.CreateIfNotExists();
 
-                        //        // add message to the queue
-                        string m = JsonConvert.SerializeObject(n);
-                        //        log.Info($"Before adding a message to the queue. Message content: {message}");
-                        //        queue.AddMessage(new CloudQueueMessage(message));
-                        //        log.Info($"Message added :-)");
+                            //        // add message to the queue
+                            string m = JsonConvert.SerializeObject(n);
+                            //        log.Info($"Before adding a message to the queue. Message content: {message}");
+                            //        queue.AddMessage(new CloudQueueMessage(message));
+                            //        log.Info($"Message added :-)");
 
-                        values.Add("message" + i, m);
+                            values.Add("message" + i, m);
+
+                            log.Info($"Notification {i} : {m}");
+                        }
+
+                        stringcontent = new FormUrlEncodedContent(values);
+
+                        apiresponse = await _client.PostAsync(_apiAddress, stringcontent);
+
+                        var responseString = await apiresponse.Content.ReadAsStringAsync();
+
+                        log.Info($"Got response: " + responseString);
                     }
-
-                    var stringcontent = new FormUrlEncodedContent(values);
-
-                    var apiresponse = await _client.PostAsync(_apiAddress, stringcontent);
-
-                    var responseString = await apiresponse.Content.ReadAsStringAsync();
-
-                    log.Info($"Got this: " + responseString);
 
                     // we have the response, now we let another flow know about it - through a call to the API!
                     var message = JsonConvert.SerializeObject(notification);
                     string link = notification.SiteUrl;
                     var obj = new Dictionary<string, string>();
-                    obj.Add("message", "Webhook triggered! Message: " + message);
+                    obj.Add("message", "New item on a list! Message: " + message);
                     obj.Add("link", link);
                     stringcontent = new FormUrlEncodedContent(obj);
 
@@ -148,8 +165,6 @@ namespace Koskila.CitizenDeveloperTools
                     return new HttpResponseMessage(HttpStatusCode.OK);
                 }
             }
-
-                
 
             log.Info($"Got nothing! Logging bad request.");
             return new HttpResponseMessage(HttpStatusCode.BadRequest);
