@@ -23,6 +23,8 @@ using System.Collections.Generic;
 using System.Globalization;
 using Microsoft.SharePoint.Client.Taxonomy;
 using System.Configuration;
+using System.Web.Script.Serialization;
+using System.Text;
 
 namespace Koskila.CitizenDeveloperTools
 {
@@ -80,90 +82,109 @@ namespace Koskila.CitizenDeveloperTools
             AzureEnvironment env = TokenHelper.getAzureEnvironment(tenantAdminUrl);
             log.Info($"Tenant url {tenantUrl} and notification from {notification.SiteUrl} ");
 
-            string fullUrl = string.Format("https://{0}{1}", tenantUrl, notification.SiteUrl);
+            string fullUrl = string.Format("{0}{1}", tenantUrl, notification.SiteUrl);
             log.Info($"{fullUrl}");
             Uri targetSiteUri = new Uri(fullUrl);
             log.Info($"Connecting to SharePoint at {targetSiteUri.AbsoluteUri}");
 
             var realm = TokenHelper.GetRealmFromTargetUrl(targetSiteUri);
-            using (var ctx = new OfficeDevPnP.Core.AuthenticationManager().GetAppOnlyAuthenticatedContext(targetSiteUri.ToString(), clientId, clientSecret, env))
+
+            try
             {
-                var ctxWeb = ctx.Site.OpenWebById(new Guid(notification.WebId));
-                try
+                using (var ctx = new OfficeDevPnP.Core.AuthenticationManager().GetAppOnlyAuthenticatedContext(targetSiteUri.ToString(), clientId, clientSecret, env))
                 {
-                    ctx.ExecuteQueryRetry();
-                }
-                catch (Exception ex)
-                {
-                    log.Error("Error in ctx ExecuteQueryRetry, stage 1: " + ex.Message);
-                    throw;
-                }
+                    log.Info("Connected to SharePoint!");
 
-                Guid listId = new Guid(notification.Resource);
-
-                List targetList = ctxWeb.Lists.GetById(listId);
-                ctx.Load(targetList, List => List.ParentWebUrl);
-                ctx.ExecuteQueryRetry();
-
-                log.Info($"Got list {targetList.Title} at {ctxWeb.Url} !");
-
-                // now send the query to a custom API as a POST
-                var values = new Dictionary<string, string>();
-
-                if (notifications.Count > 0)
-                {
-                    log.Info($"Processing notifications...");
-
-                    FormUrlEncodedContent stringcontent;
-                    HttpResponseMessage apiresponse;
-
-                    if (enrichViaExternalAPI)
+                    var ctxWeb = ctx.Site.OpenWebById(new Guid(notification.WebId));
+                    try
                     {
-                        for (int i = 0; i < notifications.Count; i++)
-                        {
-                            var n = notifications[i];
-                            //        CloudStorageAccount storageAccount = CloudStorageAccount.Parse("<YOUR STORAGE ACCOUNT>");
-                            //        // Get queue... create if does not exist.
-                            //        CloudQueueClient queueClient = storageAccount.CreateCloudQueueClient();
-                            //        CloudQueue queue = queueClient.GetQueueReference("sharepointlistwebhookeventazuread");
-                            //        queue.CreateIfNotExists();
-
-                            //        // add message to the queue
-                            string m = JsonConvert.SerializeObject(n);
-                            //        log.Info($"Before adding a message to the queue. Message content: {message}");
-                            //        queue.AddMessage(new CloudQueueMessage(message));
-                            //        log.Info($"Message added :-)");
-
-                            values.Add("message" + i, m);
-
-                            log.Info($"Notification {i} : {m}");
-                        }
-
-                        stringcontent = new FormUrlEncodedContent(values);
-
-                        apiresponse = await _client.PostAsync(_apiAddress, stringcontent);
-
-                        var responseString = await apiresponse.Content.ReadAsStringAsync();
-
-                        log.Info($"Got response: " + responseString);
+                        ctx.ExecuteQueryRetry();
+                    }
+                    catch (Exception ex)
+                    {
+                        log.Error("Error in ctx ExecuteQueryRetry, stage 1: " + ex.Message);
+                        throw;
                     }
 
-                    // we have the response, now we let another flow know about it - through a call to the API!
-                    var message = JsonConvert.SerializeObject(notification);
-                    string link = notification.SiteUrl;
-                    var obj = new Dictionary<string, string>();
-                    obj.Add("message", "New item on a list! Message: " + message);
-                    obj.Add("link", link);
-                    stringcontent = new FormUrlEncodedContent(obj);
+                    Guid listId = new Guid(notification.Resource);
 
-                    log.Info($"Now pushing this: " + message);
-                    apiresponse = await _client.PostAsync(_notificationFlowAddress, stringcontent);
+                    List targetList = ctxWeb.Lists.GetById(listId);
+                    ctx.Load(targetList, List => List.ParentWebUrl);
+                    ctx.Load(targetList, List => List.Title);
+                    ctx.Load(targetList, List => List.DefaultViewUrl);
+                    ctx.Load(ctxWeb, Web => Web.Url);
+                    ctx.ExecuteQueryRetry();
 
-                    log.Info($"Pushed to Flow! Got this back: " + apiresponse);
+                    log.Info($"Got list {targetList.Title} at {ctxWeb.Url} !");
 
-                    // if we get here we assume the request was well received
-                    return new HttpResponseMessage(HttpStatusCode.OK);
+                    // now send the query to a custom API as a POST
+                    var values = new Dictionary<string, string>();
+
+                    if (notifications.Count > 0)
+                    {
+                        log.Info($"Processing notifications...");
+
+                        StringContent stringcontent;
+                        HttpResponseMessage apiresponse;
+
+                        if (enrichViaExternalAPI)
+                        {
+                            for (int i = 0; i < notifications.Count; i++)
+                            {
+                                var n = notifications[i];
+                                //        CloudStorageAccount storageAccount = CloudStorageAccount.Parse("<YOUR STORAGE ACCOUNT>");
+                                //        // Get queue... create if does not exist.
+                                //        CloudQueueClient queueClient = storageAccount.CreateCloudQueueClient();
+                                //        CloudQueue queue = queueClient.GetQueueReference("sharepointlistwebhookeventazuread");
+                                //        queue.CreateIfNotExists();
+
+                                //        // add message to the queue
+                                string m = JsonConvert.SerializeObject(n);
+                                //        log.Info($"Before adding a message to the queue. Message content: {message}");
+                                //        queue.AddMessage(new CloudQueueMessage(message));
+                                //        log.Info($"Message added :-)");
+
+                                values.Add("message" + i, m);
+
+                                log.Info($"Notification {i} : {m}");
+                            }
+
+                            //stringcontent = new FormUrlEncodedContent(values);
+
+                            apiresponse = await _client.PostAsync(_apiAddress, stringcontent);
+
+                            var responseString = await apiresponse.Content.ReadAsStringAsync();
+
+                            log.Info($"Got response: " + responseString);
+                        }
+
+                        // we have the response, now we let another flow know about it - through a call to the API!
+                        var message = JsonConvert.SerializeObject(notification);
+                        string link = tenantUrl + targetList.DefaultViewUrl;
+                        var obj = new Dictionary<string, string>();
+                        obj.Add("message", "New item on a list: " + targetList.Title);
+                        obj.Add("link", link);
+
+                        var serializer = new JavaScriptSerializer();
+                        var json = serializer.Serialize(obj);
+                        stringcontent = new StringContent(json, Encoding.UTF8, "application/json");
+
+                        //stringcontent = new FormUrlEncodedContent(obj);
+
+                        log.Info($"Now pushing this: " + stringcontent);
+                        apiresponse = await _client.PostAsync(_notificationFlowAddress, stringcontent);
+
+                        log.Info($"Pushed to Flow! Got this back: " + apiresponse);
+
+                        // if we get here we assume the request was well received
+                        return new HttpResponseMessage(HttpStatusCode.OK);
+                    }
                 }
+            }
+            catch (Exception ex)
+            {
+                log.Error(ex.Message);
+                throw;
             }
 
             log.Info($"Got nothing! Logging bad request.");
