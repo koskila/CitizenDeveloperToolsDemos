@@ -1,30 +1,31 @@
+using System;
 using System.Linq;
 using System.Net;
 using System.Net.Http;
 using System.Threading.Tasks;
-using Microsoft.Azure.WebJobs;
-using Microsoft.Azure.WebJobs.Extensions.Http;
-using Microsoft.Azure.WebJobs.Host;
-using System;
-using Newtonsoft.Json;
-using Microsoft.WindowsAzure;
-using Microsoft.WindowsAzure.Storage;
-using Microsoft.WindowsAzure.Storage.Queue;
-using System.Collections.Generic;
-
-using OfficeDevPnP.Core;
-using Microsoft.SharePoint.Client;
-using System;
 using System.IO;
 using System.Text.RegularExpressions;
 using System.Collections.Generic;
-//using Microsoft.Azure.CognitiveServices.Language.TextAnalytics.Models;
-//using Microsoft.Azure.CognitiveServices.Language.TextAnalytics;
 using System.Globalization;
-using Microsoft.SharePoint.Client.Taxonomy;
 using System.Configuration;
 using System.Web.Script.Serialization;
 using System.Text;
+
+using Newtonsoft.Json;
+
+using OfficeDevPnP.Core;
+
+using Microsoft.Azure.WebJobs;
+using Microsoft.Azure.WebJobs.Extensions.Http;
+using Microsoft.Azure.WebJobs.Host;
+using Microsoft.SharePoint.Client;
+using Microsoft.SharePoint.Client.Taxonomy;
+using Microsoft.WindowsAzure;
+using Microsoft.WindowsAzure.Storage;
+using Microsoft.WindowsAzure.Storage.Queue;
+
+//using Microsoft.Azure.CognitiveServices.Language.TextAnalytics.Models;
+//using Microsoft.Azure.CognitiveServices.Language.TextAnalytics;
 
 namespace Koskila.CitizenDeveloperTools
 {
