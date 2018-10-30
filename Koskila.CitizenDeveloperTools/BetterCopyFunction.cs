@@ -58,13 +58,18 @@ namespace Koskila.CitizenDeveloperTools
                 var realm = TokenHelper.GetRealmFromTargetUrl(targetSiteUri);
                 // parse tenant admin url from the sourceUrl (there's probably a cuter way to do this but this is simple :])
                 string tenantAdminUrl = sourceUrl.Substring(0, sourceUrl.IndexOf(".com") + 4).TrimEnd(new[] { '/' }).Replace(".sharepoint", "-admin.sharepoint");
-                // parse tenant admin url from the sourceUrl
+                // parse tenant url from the admin url
                 var tenantUrl = tenantAdminUrl.Substring(0, tenantAdminUrl.IndexOf(".com") + 4).Replace("-admin", "");
                 AzureEnvironment env = TokenHelper.getAzureEnvironment(tenantAdminUrl);
+
                 using (var ctx_target = new OfficeDevPnP.Core.AuthenticationManager().GetAppOnlyAuthenticatedContext(targetSiteUri.ToString(), clientId, clientSecret, env))
                 {
+                    log.Info("Target site context built successfully!");
+
                     using (var ctx_source = new OfficeDevPnP.Core.AuthenticationManager().GetAppOnlyAuthenticatedContext(sourceSiteUri.ToString(), clientId, clientSecret, env))
                     {
+                        log.Info("Source site context built successfully!");
+
                         var exists = ctx_target.WebExistsFullUrl(targetUrl);
 
                         string targetWebUrl = targetUrl.Replace(tenantUrl, "");
